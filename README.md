@@ -1,2 +1,284 @@
-# gmlabtest
-test
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GM Lab - Сохранение работает</title>
+    <style>
+        :root {
+            --bg-color: #121212;
+            --panel-bg: #1e1e1e;
+            --accent: #ffbf00;
+            --text-main: #ffffff;
+            --border: #333333;
+        }
+
+        body { background-color: var(--bg-color); color: var(--text-main); font-family: sans-serif; margin: 0; padding: 20px; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        
+        /* Форма */
+        .add-form {
+            background: var(--panel-bg); padding: 20px; border-radius: 8px;
+            display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end;
+            border: 1px solid var(--border); margin-bottom: 30px;
+        }
+        input[type="text"] { flex: 1; min-width: 250px; padding: 12px; background: #2a2a2a; border: none; color: white; border-radius: 4px; }
+        select { padding: 12px; background: #2a2a2a; border: none; color: white; border-radius: 4px; }
+        button.btn-add {
+            padding: 12px 30px; background: var(--accent); color: black; border: none;
+            font-weight: bold; border-radius: 4px; cursor: pointer;
+        }
+
+        /* Таблица */
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; background: var(--panel-bg); border-radius: 8px; overflow: hidden; }
+        th, td { padding: 15px; text-align: left; border-bottom: 1px solid var(--border); }
+        th { background: #252525; color: #aaa; text-transform: uppercase; font-size: 0.8em; }
+        
+        /* Статус */
+        .status-badge {
+            padding: 6px 12px; border-radius: 20px; font-weight: bold; font-size: 0.85em;
+            cursor: pointer; user-select: none; border: none; outline: none;
+        }
+        .st-new { background: rgba(255, 191, 0, 0.2); color: var(--accent); }
+        .st-progress { background: rgba(0, 180, 255, 0.2); color: #00b4ff; }
+        .st-done { background: rgba(100, 100, 100, 0.3); color: #888; text-decoration: line-through; }
+
+        /* Фото */
+        .thumb { width: 40px; height: 40px; object-fit: cover; border-radius: 4px; cursor: pointer; margin-right: 5px; border: 2px solid transparent; }
+        .thumb:hover { border-color: var(--accent); }
+        
+        /* Модалка */
+        #modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); justify-content: center; align-items: center; }
+        #modal-img { max-width: 90%; max-height: 90%; }
+        .nav-btn { position: absolute; top: 50%; transform: translateY(-50%); color: white; font-size: 40px; cursor: pointer; background: rgba(0,0,0,0.5); padding: 10px; border-radius: 50%; }
+        .prev { left: 20px; } .next { right: 20px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1 style="color: var(--accent); text-align: center;">GM LAB</h1>
+
+    <!-- Форма -->
+    <div class="add-form">
+        <input type="text" id="taskInput" placeholder="Новая задача...">
+        <select id="statusInput">
+            <option value="new">Новая</option>
+            <option value="progress">В работе</option>
+            <option value="done">Готово</option>
+        </select>
+        <button class="btn-add" onclick="addTask()">Добавить</button>
+    </div>
+
+    <!-- Таблица -->
+    <table>
+        <thead>
+            <tr>
+                <th>Задача</th>
+                <th>Статус</th>
+                <th>Фото</th>
+                <th>Действия</th>
+            </tr>
+        </thead>
+        <tbody id="tasksBody"></tbody>
+    </table>
+</div>
+
+<!-- Модальное окно -->
+<div id="modal" onclick="closeModal(event)">
+    <span class="nav-btn prev" onclick="event.stopPropagation(); changePhoto(-1)">&#10094;</span>
+    <img src="" id="modal-img" alt="Фото">
+    <span class="nav-btn next" onclick="event.stopPropagation(); changePhoto(1)">&#10095;</span>
+</div>
+
+<script>
+    // --- ГЛАВНАЯ ПРОВЕРКА: РАБОТАЕТ ЛИ localStorage? ---
+    const STORAGE_KEY = 'gmlab_tasks_v2';
+    let tasks = [];
+    let currentModalIndex = -1;
+    let currentPhotoIndex = 0;
+
+    function checkStorage() {
+        try {
+            const test = '__test__';
+            localStorage.setItem(STORAGE_KEY, test);
+            if (localStorage.getItem(STORAGE_KEY) !== test) return false;
+            localStorage.removeItem(STORAGE_KEY);
+            return true;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    const isStorageAvailable = checkStorage();
+
+    if (!isStorageAvailable) {
+        alert('⚠️ ВНИМАНИЕ: Браузер блокирует сохранение данных!\n\nЧтобы задачи сохранялись после обновления:\n1. Не открывай файл просто двойным кликом.\n2. Используй Live Server в VS Code или любой локальный сервер.\n3. Адрес должен начинаться на http://, а не file://');
+    }
+
+    // Загрузка данных
+    function loadTasks() {
+        if (!isStorageAvailable) return;
+        try {
+            const stored = localStorage.getItem(STORAGE_KEY);
+            tasks = stored ? JSON.parse(stored) : [];
+        } catch (e) {
+            console.error('Ошибка загрузки', e);
+            tasks = [];
+        }
+        renderTasks();
+    }
+
+    // Сохранение данных
+    function saveTasks() {
+        if (!isStorageAvailable) return;
+        try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+        } catch (e) {
+            console.error('Ошибка сохранения', e);
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', loadTasks);
+
+    // Добавление
+    function addTask() {
+        const text = document.getElementById('taskInput').value.trim();
+        const status = document.getElementById('statusInput').value;
+        if (!text) { alert('Введите задачу!'); return; }
+
+        tasks.unshift({
+            id: Date.now(),
+            text: text,
+            status: status,
+            photos: []
+        });
+        saveTasks();
+        renderTasks();
+        document.getElementById('taskInput').value = '';
+    }
+
+    // Отрисовка
+    function renderTasks() {
+        const tbody = document.getElementById('tasksBody');
+        tbody.innerHTML = '';
+
+        if (tasks.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:20px;">Список пуст</td></tr>';
+            return;
+        }
+
+        tasks.forEach((task, index) => {
+            // Фото миниатюры
+            let photosHtml = '';
+            if (task.photos.length > 0) {
+                task.photos.forEach((url, pIdx) => {
+                    photosHtml += `<img src="${url}" class="thumb" onclick="openModal(${index}, ${pIdx})">`;
+                });
+            } else {
+                photosHtml = '<span style="color:#666">Нет фото</span>';
+            }
+
+            // Кнопка загрузки
+            const fileInputId = 'file_' + index;
+            const uploadBtn = `
+                <input type="file" id="${fileInputId}" multiple style="display:none" onchange="handleFiles(this, ${index})">
+                <button type="button" onclick="document.getElementById('${fileInputId}').click()" style="background:none; border:none; color:var(--accent); cursor:pointer; padding:0;">📷</button>
+            `;
+
+            const statusClass = task.status === 'new' ? 'st-new' : (task.status === 'progress' ? 'st-progress' : 'st-done');
+
+            tbody.innerHTML += `
+                <tr>
+                    <td>${escapeHtml(task.text)}</td>
+                    <td>
+                        <select class="status-badge ${statusClass}" onchange="updateStatus(${index}, this.value)">
+                            <option value="new" ${task.status === 'new' ? 'selected' : ''}>Новая</option>
+                            <option value="progress" ${task.status === 'progress' ? 'selected' : ''}>В работе</option>
+                            <option value="done" ${task.status === 'done' ? 'selected' : ''}>Готово</option>
+                        </select>
+                    </td>
+                    <td>
+                        <div style="margin-bottom:5px;">${photosHtml}</div>
+                        ${uploadBtn}
+                    </td>
+                    <td>
+                        <button onclick="deleteTask(${index})" style="background:#500; color:red; border:none; padding:5px 10px; cursor:pointer;">Удалить</button>
+                    </td>
+                </tr>
+            `;
+        });
+    }
+
+    // Статус
+    function updateStatus(index, newStatus) {
+        tasks[index].status = newStatus;
+        saveTasks();
+        renderTasks();
+    }
+
+    // Фото (загрузка)
+    function handleFiles(input, taskIndex) {
+        const files = input.files;
+        if (!files) return;
+        Array.from(files).forEach(file => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                tasks[taskIndex].photos.push(e.target.result);
+                saveTasks();
+                renderTasks();
+            };
+            reader.readAsDataURL(file);
+        });
+        input.value = '';
+    }
+
+    // Удаление
+    function deleteTask(index) {
+        if(confirm('Удалить?')) {
+            tasks.splice(index, 1);
+            saveTasks();
+            renderTasks();
+        }
+    }
+
+    // Модальное окно (ДОПИСАНО ПОЛНОСТЬЮ)
+    function openModal(taskIdx, photoIdx) {
+        currentModalIndex = taskIdx;
+        currentPhotoIndex = photoIdx;
+        document.getElementById('modal-img').src = tasks[taskIdx].photos[photoIdx];
+        document.getElementById('modal').style.display = 'flex';
+    }
+
+    function closeModal(event) {
+        if (event.target === document.getElementById('modal')) {
+            document.getElementById('modal').style.display = 'none';
+        }
+    }
+
+    function changePhoto(direction) {
+        // Защита от ошибок, если окно закрыто или данных нет
+        if (currentModalIndex === -1 || !tasks[currentModalIndex] || tasks[currentModalIndex].photos.length === 0) return;
+
+        currentPhotoIndex += direction;
+        const total = tasks[currentModalIndex].photos.length;
+
+        // Зацикливание: если конец - идем в начало, если начало - в конец
+        if (currentPhotoIndex >= total) currentPhotoIndex = 0;
+        if (currentPhotoIndex < 0) currentPhotoIndex = total - 1;
+
+        document.getElementById('modal-img').src = tasks[currentModalIndex].photos[currentPhotoIndex];
+    }
+
+    function escapeHtml(text) {
+        return text
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
+</script>
+
+</body>
+</html>
